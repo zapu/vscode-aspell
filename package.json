@@ -1,0 +1,36 @@
+{
+  "name": "vscode-aspell",
+  "displayName": "Spell checker using `aspell`",
+  "version": "0.1.0",
+  "publisher": "zapu",
+  "description": "Spell checker for VSCode that uses `aspell`",
+  "categories": [
+    "Linters"
+  ],
+  "keywords": [
+    "spelling",
+    "aspell"
+  ],
+  "engines": {
+    "vscode": "^1.23.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "compile": "tsc -p ./tsconfig.json",
+    "package": "./node_modules/.bin/vsce package",
+    "update-vscode": "vscode-install",
+    "postinstall": "vscode-install"
+  },
+  "dependencies": {
+    "vscode": "^1.1.21"
+  },
+  "devDependencies": {
+    "@types/node": "^10.11.4",
+    "typescript": "^3.1.1"
+  }
+}
