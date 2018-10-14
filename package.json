@@ -26,6 +26,20 @@
     "update-vscode": "vscode-install",
     "postinstall": "vscode-install"
   },
+  "contributes": {
+    "commands": [
+      {
+        "command": "aspell.spellCheck",
+        "title": "Check spelling with aspell",
+        "category": "Spell checking"
+      },
+      {
+        "command": "aspell.clearSpellCheck",
+        "title": "Clear aspell spell checking suggestions",
+        "category": "Spell checking"
+      }
+    ]
+  },
   "dependencies": {
     "vscode": "^1.1.21"
   },

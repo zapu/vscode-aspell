@@ -12,7 +12,8 @@ let spellDiagnostics: vscode.DiagnosticCollection;
 let aspell: child_process.ChildProcess = null;
 let aspellLock = new Lock();
 let aspellLines: AwaitLine;
-let knownGood = {};
+let knownGood = arrayToHash(["func", "cb", "ctx", "Keybase"]);
+let knownBad = {};
 
 function arrayToHash(array: string[]) {
     return array.reduce((obj, x) => { obj[x] = true; return obj; }, {});
@@ -24,26 +25,34 @@ interface spellCheckError {
 }
 
 async function checkSpelling(words: string[]): Promise<spellCheckError[]> {
+    if (words.length === 0) {
+        // Can't have spelling errors if you don't have any words.
+        return [];
+    }
     await aspellLock.lock();
     console.log("Sending ", words, " to aspell");
     aspell.stdin.write(words.join(" ") + "\n");
     let ret = [];
-    let wordHash = arrayToHash(words);
+    let newGoods = arrayToHash(words);
     for (; ;) {
         let line = await aspellLines.getLine();
-        console.log("Lines got us line:", line);
         if (line == "") {
             break; // aspell signals done
         }
         let error = spellCheckLine(line);
         if (error != null) {
-            delete wordHash[error.word];
+            delete newGoods[error.word];
             ret.push(error);
+            knownBad[error.word] = error;
         }
     }
-    Object.assign(knownGood, wordHash);
+    Object.assign(knownGood, newGoods);
     aspellLock.unlock();
     return ret;
+}
+
+function trimCache() {
+    console.log("Cache is: ", Object.keys(knownGood).length, Object.keys(knownBad).length);
 }
 
 function triggerSpellcheck(document: vscode.TextDocument) {
@@ -54,8 +63,18 @@ function triggerSpellcheck(document: vscode.TextDocument) {
     words = words.filter((x) => { return x.length > 1 });
     words = words.filter((x) => { return knownGood[x] === undefined });
 
+    let knownErrors: spellCheckError[] = words.map((x) => {
+        return knownBad[x];
+    }).filter((x) => { return x != null });
+
+    words = words.filter((x) => { return knownBad[x] === undefined });
+
     checkSpelling(words).then((errors: spellCheckError[]) => {
-        console.log('Errors:', errors);
+        console.log('Errors (from aspell):', errors.length);
+        console.log('Errors (from cache):', knownErrors.length);
+
+        errors = errors.concat(knownErrors);
+
         if (errors.length == 0) {
             spellDiagnostics.set(document.uri, []);
             return;
@@ -64,22 +83,35 @@ function triggerSpellcheck(document: vscode.TextDocument) {
         let diagnostics: vscode.Diagnostic[] = [];
         let text = document.getText();
         errors.forEach((err) => {
-            let start = document.positionAt(text.indexOf(err.word));
-            let end = start.with(undefined, start.character + err.word.length);
-            diagnostics.push({
-                severity: vscode.DiagnosticSeverity.Warning,
-                range: new vscode.Range(start, end),
-                message: err.word + "(suggestions: " + err.suggestions.slice(0, 10).join(" ") + ")",
-                source: 'aspell'
-            });
+            let index = -1;
+            for (; ;) {
+                index = text.indexOf(err.word, index + 1);
+                if (index == -1) {
+                    break;
+                }
+                let start = document.positionAt(index);
+                let end = start.with(undefined, start.character + err.word.length);
+                diagnostics.push({
+                    severity: vscode.DiagnosticSeverity.Warning,
+                    range: new vscode.Range(start, end),
+                    message: err.word + "(suggestions: " + err.suggestions.slice(0, 10).join(" ") + ")",
+                    source: 'aspell'
+                });
+            }
         });
         console.log(diagnostics);
         spellDiagnostics.set(document.uri, diagnostics);
+
+        trimCache();
     });
 }
 
 function triggerDiffSpellcheck(event: vscode.TextDocumentChangeEvent) {
     triggerSpellcheck(event.document);
+}
+
+function triggerSpellcheckCommand(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit) {
+    triggerSpellcheck(textEditor.document);
 }
 
 const aspellRegexp = /^\& ([a-zA-Z]+) ([0-9]+) ([0-9]+): (.+)$/;
@@ -97,21 +129,6 @@ function spellCheckLine(chunk: string): spellCheckError | null {
     }
 }
 
-function emitLines(s: stream.Readable) {
-    let backlog = "";
-    s.on('data', function (data) {
-        backlog += data;
-        let i = backlog.indexOf("\n")
-        while (i != -1) {
-            const line = backlog.substring(0, i);
-            console.log("emitLines emitting:", line);
-            s.emit('line', line);
-            backlog = backlog.substring(i + 1);
-            i = backlog.indexOf("\n");
-        }
-    });
-}
-
 class AwaitLine {
     awaiters: ((string) => void)[];
     backlog: string[];
@@ -120,14 +137,25 @@ class AwaitLine {
         this.backlog = [];
     }
 
+    private feedLine(data: string) {
+        if (this.awaiters.length > 0) {
+            this.awaiters.shift()(data);
+        } else {
+            this.backlog.push(data);
+        }
+    }
+
     static fromStream(s: stream.Readable): AwaitLine {
         const obj = new AwaitLine();
-        emitLines(s);
-        s.on('line', function (data: string) {
-            if (obj.awaiters.length > 0) {
-                obj.awaiters.shift()(data);
-            } else {
-                obj.backlog.push(data);
+        let dataBacklog = "";
+        s.on('data', function (data) {
+            dataBacklog += data;
+            let i = dataBacklog.indexOf("\n");
+            while (i != -1) {
+                const line = dataBacklog.substring(0, i);
+                obj.feedLine(line);
+                dataBacklog = dataBacklog.substring(i + 1);
+                i = dataBacklog.indexOf("\n");
             }
         });
         return obj;
@@ -145,9 +173,6 @@ class AwaitLine {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-    console.log("hello michal");
-    console.log(context.subscriptions);
-
     spellDiagnostics = vscode.languages.createDiagnosticCollection('aspell');
 
     aspell = child_process.spawn('aspell', ['pipe'])
@@ -160,10 +185,16 @@ export function activate(context: vscode.ExtensionContext): void {
         process.exit(1);
     })
 
-    vscode.workspace.onDidOpenTextDocument(triggerSpellcheck, this);
-    vscode.workspace.onDidChangeTextDocument(triggerDiffSpellcheck, this);
-    vscode.workspace.onDidSaveTextDocument(triggerSpellcheck, this);
+    // vscode.workspace.onDidOpenTextDocument(triggerSpellcheck);
+    // vscode.workspace.onDidChangeTextDocument(triggerDiffSpellcheck);
+    // vscode.workspace.onDidSaveTextDocument(triggerSpellcheck);
+
     vscode.workspace.onDidCloseTextDocument((textDocument) => {
         spellDiagnostics.delete(textDocument.uri);
     }, null);
+
+    vscode.commands.registerTextEditorCommand("aspell.spellCheck", triggerSpellcheckCommand);
+    vscode.commands.registerTextEditorCommand("aspell.clearSpellCheck", (textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit) => {
+        spellDiagnostics.delete(textEditor.document.uri);
+    });
 }
