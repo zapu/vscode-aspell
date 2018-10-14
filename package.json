@@ -1,9 +1,13 @@
 {
   "name": "vscode-aspell",
-  "displayName": "Spell checker using `aspell`",
+  "displayName": "Aspell",
   "version": "0.1.0",
   "publisher": "zapu",
   "description": "Spell checker for VSCode that uses `aspell`",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zapu/vscode-aspell"
+  },
   "categories": [
     "Linters"
   ],
@@ -40,6 +44,7 @@
   },
   "devDependencies": {
     "@types/node": "^10.11.4",
-    "typescript": "^3.1.1"
+    "typescript": "^3.1.1",
+    "vsce": "^1.51.1"
   }
 }
