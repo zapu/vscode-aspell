@@ -12,7 +12,7 @@ let spellDiagnostics: vscode.DiagnosticCollection;
 let aspell: child_process.ChildProcess = null;
 let aspellLock = new Lock();
 let aspellLines: AwaitLine;
-let knownGood = arrayToHash(["func", "cb", "ctx", "Keybase"]);
+let knownGood = arrayToHash(["func", "cb", "ctx", "keybase", "Keybase", "esc", "ret"]);
 let knownBad = {};
 
 function arrayToHash(array: string[]) {
@@ -111,7 +111,12 @@ function triggerDiffSpellcheck(event: vscode.TextDocumentChangeEvent) {
 }
 
 function triggerSpellcheckCommand(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit) {
-    triggerSpellcheck(textEditor.document);
+    const uri = textEditor.document.uri;
+    if (!spellDiagnostics.has(uri)) {
+        triggerSpellcheck(textEditor.document);
+    } else {
+        spellDiagnostics.delete(uri);
+    }
 }
 
 const aspellRegexp = /^\& ([a-zA-Z]+) ([0-9]+) ([0-9]+): (.+)$/;
@@ -194,7 +199,4 @@ export function activate(context: vscode.ExtensionContext): void {
     }, null);
 
     vscode.commands.registerTextEditorCommand("aspell.spellCheck", triggerSpellcheckCommand);
-    vscode.commands.registerTextEditorCommand("aspell.clearSpellCheck", (textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit) => {
-        spellDiagnostics.delete(textEditor.document.uri);
-    });
 }
