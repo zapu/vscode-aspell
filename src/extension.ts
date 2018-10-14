@@ -184,6 +184,10 @@ export function activate(context: vscode.ExtensionContext): void {
     aspell.stdout.setEncoding('utf8');
     aspellLines = AwaitLine.fromStream(aspell.stdout);
 
+    // Enter "terse mode" (do not print "*" to indicate correct words, only
+    // print suggestions for incorrect words.)
+    aspell.stdin.write("!\n");
+
     aspell.on('close', function () {
         console.log('Aspell closed');
         // kill the extension, we don't have a way to recover.
