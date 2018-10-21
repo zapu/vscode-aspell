@@ -1,7 +1,7 @@
 {
   "name": "vscode-aspell",
   "displayName": "Aspell",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "publisher": "zapu",
   "description": "Spell checker for VSCode that uses `aspell`",
   "repository": {
