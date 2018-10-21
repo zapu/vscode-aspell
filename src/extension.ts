@@ -15,6 +15,8 @@ let aspellLines: AwaitLine;
 let knownGood = arrayToHash(["func", "cb", "ctx", "keybase", "Keybase", "esc", "ret"]);
 let knownBad = {};
 
+let enabledDocuments: { [uri: string]: boolean } = {};
+
 function arrayToHash(array: string[]) {
     return array.reduce((obj, x) => { obj[x] = true; return obj; }, {});
 }
@@ -91,47 +93,57 @@ function triggerSpellcheck(document: vscode.TextDocument) {
                 }
                 let start = document.positionAt(index);
                 let end = start.with(undefined, start.character + err.word.length);
-                diagnostics.push({
+                let diag = {
                     severity: vscode.DiagnosticSeverity.Warning,
                     range: new vscode.Range(start, end),
                     message: err.word + "(suggestions: " + err.suggestions.slice(0, 10).join(" ") + ")",
                     source: 'aspell'
-                });
+                };
+                diagnostics.push(diag);
             }
         });
-        console.log(diagnostics);
         spellDiagnostics.set(document.uri, diagnostics);
 
         trimCache();
     });
 }
 
-function triggerDiffSpellcheck(event: vscode.TextDocumentChangeEvent) {
-    triggerSpellcheck(event.document);
+function triggerSpellcheckIfEnabled(document: vscode.TextDocument) {
+    const enabled = enabledDocuments[document.uri.toString()];
+    if (enabled) {
+        triggerSpellcheck(document);
+    }
+}
+
+function triggerDiffSpellcheckIfEnabled(event: vscode.TextDocumentChangeEvent) {
+    triggerSpellcheckIfEnabled(event.document);
 }
 
 function triggerSpellcheckCommand(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit) {
     const uri = textEditor.document.uri;
-    if (!spellDiagnostics.has(uri)) {
+    const uriStr = uri.toString();
+    const enabled = enabledDocuments[uriStr];
+    if (!enabled) {
+        enabledDocuments[uriStr] = true;
         triggerSpellcheck(textEditor.document);
     } else {
+        delete enabledDocuments[uriStr];
         spellDiagnostics.delete(uri);
     }
 }
 
-const aspellRegexp = /^\& ([a-zA-Z]+) ([0-9]+) ([0-9]+): (.+)$/;
+const aspellRegexp = /^[\&#] ([a-zA-Z]+) ([0-9]+) ([0-9]+): (.+)$/;
 function spellCheckLine(chunk: string): spellCheckError | null {
     if (chunk.length < 1) {
         return null;
     }
     let match = chunk.match(aspellRegexp);
-    if (match != null) {
-        const word = match[1];
-        const suggestions = match[4].split(" ");
-        return { word, suggestions };
-    } else {
+    if (match == null) {
         return null;
     }
+    const word = match[1];
+    const suggestions = match[4].split(" ");
+    return { word, suggestions };
 }
 
 class AwaitLine {
@@ -194,9 +206,9 @@ export function activate(context: vscode.ExtensionContext): void {
         process.exit(1);
     })
 
-    // vscode.workspace.onDidOpenTextDocument(triggerSpellcheck);
-    // vscode.workspace.onDidChangeTextDocument(triggerDiffSpellcheck);
-    // vscode.workspace.onDidSaveTextDocument(triggerSpellcheck);
+    vscode.workspace.onDidOpenTextDocument(triggerSpellcheckIfEnabled);
+    vscode.workspace.onDidChangeTextDocument(triggerDiffSpellcheckIfEnabled);
+    vscode.workspace.onDidSaveTextDocument(triggerSpellcheckIfEnabled);
 
     vscode.workspace.onDidCloseTextDocument((textDocument) => {
         spellDiagnostics.delete(textDocument.uri);
