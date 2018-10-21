@@ -14,7 +14,7 @@ let aspellLock = new Lock();
 let aspellLines: AwaitLine;
 
 // Ignore these words.
-let knownIgnore = arrayToHash(["func", "cb", "ctx", "keybase", "esc", "ret"]);
+let knownIgnore = arrayToHash(["func", "cb", "ctx", "keybase", "esc", "ret", "const", "vscode"]);
 
 // Spellchecking cache
 let knownGood = {};
@@ -22,7 +22,7 @@ let knownBad = {};
 
 let enabledDocuments: { [uri: string]: boolean } = {};
 let lastDocumentURI: string;
-let documentRebouncer = new Debouncer(250);
+let documentDebouncer = new Debouncer(250);
 
 function arrayToHash(array: string[]) {
     return array.reduce((obj, x) => { obj[x] = true; return obj; }, {});
@@ -133,7 +133,7 @@ async function triggerSpellcheckIfEnabled(document: vscode.TextDocument) {
     }
 
     if (uriStr == lastDocumentURI) {
-        let p = documentRebouncer.queue_or_bust();
+        let p = documentDebouncer.queue_or_bust();
         if (p == null) {
             // Spellcheck was already queued for that document, do not start
             // another one.
