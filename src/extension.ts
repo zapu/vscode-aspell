@@ -233,9 +233,7 @@ export function activate(context: vscode.ExtensionContext): void {
     aspell.stdin.write("!\n");
 
     aspell.on('close', function () {
-        console.log('Aspell closed');
-        // kill the extension, we don't have a way to recover.
-        process.exit(1);
+        vscode.window.showErrorMessage("Aspell process exited, extension is offline.");
     })
 
     vscode.workspace.onDidOpenTextDocument(triggerSpellcheckIfEnabled);
