@@ -12,11 +12,16 @@ let spellDiagnostics: vscode.DiagnosticCollection;
 let aspell: child_process.ChildProcess = null;
 let aspellLock = new Lock();
 let aspellLines: AwaitLine;
-let knownGood = arrayToHash(["func", "cb", "ctx", "keybase", "Keybase", "esc", "ret"]);
+
+// Ignore these words.
+let knownIgnore = arrayToHash(["func", "cb", "ctx", "keybase", "esc", "ret"]);
+
+// Spellchecking cache
+let knownGood = {};
 let knownBad = {};
 
 let enabledDocuments: { [uri: string]: boolean } = {};
-let lastDocumentURI : string;
+let lastDocumentURI: string;
 let documentRebouncer = new Debouncer(250);
 
 function arrayToHash(array: string[]) {
@@ -56,15 +61,25 @@ async function checkSpelling(words: string[]): Promise<spellCheckError[]> {
 }
 
 function trimCache() {
+    const CACHE_LEN_GOAL = 10000;
+    function trimOneCache(cache: object) {
+        const keys = Object.keys(cache);
+        for (let i = 0; i < keys.length - CACHE_LEN_GOAL; i++) {
+            delete cache[keys[i]];
+        }
+    }
+
+    trimOneCache(knownGood);
+    trimOneCache(knownBad);
     console.log("Cache is: ", Object.keys(knownGood).length, Object.keys(knownBad).length);
 }
 
 function triggerSpellcheck(document: vscode.TextDocument) {
     let matches = document.getText().match(wordRegexp);
-    console.log('Trigger');
     let matchesHash = arrayToHash(matches);
     let words = Object.keys(matchesHash);
     words = words.filter((x) => { return x.length > 1 });
+    words = words.filter((x) => { return knownIgnore[x.toLowerCase()] === undefined; });
     words = words.filter((x) => { return knownGood[x] === undefined });
 
     let knownErrors: spellCheckError[] = words.map((x) => {
@@ -117,7 +132,7 @@ async function triggerSpellcheckIfEnabled(document: vscode.TextDocument) {
         return;
     }
 
-    if(uriStr == lastDocumentURI) {
+    if (uriStr == lastDocumentURI) {
         let p = documentRebouncer.queue_or_bust();
         if (p == null) {
             // Spellcheck was already queued for that document, do not start
