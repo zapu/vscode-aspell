@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import * as child_process from 'child_process';
 import * as stream from "stream";
-import { Lock } from './lock';
+import { Lock, Debouncer } from './lock';
 
 const wordRegexp = /[A-Z]?[a-z]+('t)?/g;
 
@@ -16,6 +16,8 @@ let knownGood = arrayToHash(["func", "cb", "ctx", "keybase", "Keybase", "esc", "
 let knownBad = {};
 
 let enabledDocuments: { [uri: string]: boolean } = {};
+let lastDocumentURI : string;
+let documentRebouncer = new Debouncer(250);
 
 function arrayToHash(array: string[]) {
     return array.reduce((obj, x) => { obj[x] = true; return obj; }, {});
@@ -108,11 +110,26 @@ function triggerSpellcheck(document: vscode.TextDocument) {
     });
 }
 
-function triggerSpellcheckIfEnabled(document: vscode.TextDocument) {
-    const enabled = enabledDocuments[document.uri.toString()];
-    if (enabled) {
-        triggerSpellcheck(document);
+async function triggerSpellcheckIfEnabled(document: vscode.TextDocument) {
+    const uriStr = document.uri.toString();
+    const enabled = enabledDocuments[uriStr];
+    if (!enabled) {
+        return;
     }
+
+    if(uriStr == lastDocumentURI) {
+        let p = documentRebouncer.queue_or_bust();
+        if (p == null) {
+            // Spellcheck was already queued for that document, do not start
+            // another one.
+            return;
+        } else {
+            await p;
+        }
+    } else {
+        lastDocumentURI = uriStr;
+    }
+    triggerSpellcheck(document);
 }
 
 function triggerDiffSpellcheckIfEnabled(event: vscode.TextDocumentChangeEvent) {
