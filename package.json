@@ -39,10 +39,8 @@
       }
     ]
   },
-  "dependencies": {
-    "vscode": "^1.1.35"
-  },
   "devDependencies": {
+    "vscode": "^1.1.35",
     "@types/node": "^10.11.4",
     "typescript": "^3.1.1"
   }
