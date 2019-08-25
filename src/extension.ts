@@ -17,15 +17,15 @@ let aspellLines: AwaitLine;
 let knownIgnore = arrayToHash(["func", "cb", "ctx", "keybase", "esc", "ret", "const", "vscode"]);
 
 // Spellchecking cache
-let knownGood = {};
-let knownBad = {};
+let knownGood = {} as { [word: string]: boolean };
+let knownBad = {} as { [word: string]: spellCheckError };
 
 let enabledDocuments: { [uri: string]: boolean } = {};
 let lastDocumentURI: string;
 let documentDebouncer = new Debouncer(250);
 
 function arrayToHash(array: string[]) {
-    return array.reduce((obj, x) => { obj[x] = true; return obj; }, {});
+    return array.reduce((obj, x) => { obj[x] = true; return obj; }, {} as { [k: string]: boolean });
 }
 
 interface spellCheckError {
@@ -62,7 +62,7 @@ async function checkSpelling(words: string[]): Promise<spellCheckError[]> {
 
 function trimCache() {
     const CACHE_LEN_GOAL = 10000;
-    function trimOneCache(cache: object) {
+    function trimOneCache(cache: { [key: string]: any }) {
         const keys = Object.keys(cache);
         for (let i = 0; i < keys.length - CACHE_LEN_GOAL; i++) {
             delete cache[keys[i]];
@@ -179,7 +179,7 @@ function spellCheckLine(chunk: string): spellCheckError | null {
 }
 
 class AwaitLine {
-    awaiters: ((string) => void)[];
+    awaiters: ((line: string) => void)[];
     backlog: string[];
     constructor() {
         this.awaiters = [];
