@@ -1,7 +1,7 @@
 {
   "name": "vscode-aspell",
   "displayName": "Aspell",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "zapu",
   "description": "Spell checker for VSCode that uses `aspell`",
   "repository": {
@@ -35,7 +35,7 @@
       {
         "command": "aspell.spellCheck",
         "title": "Check spelling with aspell or clear current suggestions",
-        "category": "Spell checking"
+        "category": "Spell check"
       }
     ]
   },
