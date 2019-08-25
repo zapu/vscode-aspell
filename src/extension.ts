@@ -14,7 +14,7 @@ let aspellLines: AwaitLine;
 // Ignore these words.
 let knownIgnore = arrayToHash([
     // Various language keywords
-    "func", "isnt", "noop", "const", "instanceof",
+    "func", "isnt", "noop", "const", "instanceof", "boolean", "async",
     // Often used variable names
     "cb", "ctx", "esc", "ret", "utils", "param",
     // Product names
