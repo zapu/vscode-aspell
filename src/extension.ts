@@ -5,8 +5,13 @@ import * as child_process from 'child_process';
 import * as stream from "stream";
 import { Lock, Debouncer } from './lock';
 
-let spellDiagnostics: vscode.DiagnosticCollection;
 
+// Variables and types
+
+let spellDiagnostics: vscode.DiagnosticCollection;
+let statusBarItem: vscode.StatusBarItem;
+
+// Aspell child process and helpers.
 let aspell: child_process.ChildProcess = null;
 let aspellLock = new Lock();
 let aspellLines: AwaitLine;
@@ -16,11 +21,11 @@ let knownIgnore = arrayToHash([
     // Various language keywords
     "func", "isnt", "noop", "const", "instanceof", "boolean", "async",
     // Often used variable names
-    "cb", "ctx", "esc", "ret", "utils", "param",
+    "cb", "ctx", "esc", "ret", "utils", "param", "args",
     // Product names
     "vscode", "keybase",
     // Other keywords commonly found in code
-    "tokenize", "stringify", "fs", "vm", "http", "https",
+    "tokenize", "stringify", "fs", "vm", "http", "https", "uri",
 ]);
 
 type spellCheckError = {
@@ -30,13 +35,22 @@ type spellCheckError = {
 
 type spellCheckErrorHash = { [word: string]: spellCheckError }
 
-// Spellchecking cache
+// Spellchecking cache.
 let knownGood = {} as { [word: string]: boolean };
 let knownBad = {} as spellCheckErrorHash;
 
-let enabledDocuments: { [uri: string]: boolean } = {};
+// Enable or disable spellchecking either everywhere or by document.
+let enabledAllDocuments = false;
+let enabledDocuments = new Set<string>();
+
 let lastDocumentURI: string;
 let documentDebouncer = new Debouncer(250);
+
+// --------------------
+
+function isUriEnabled(uri: string) {
+    return enabledAllDocuments || enabledDocuments.has(uri);
+}
 
 function arrayToHash(array: string[]) {
     return array.reduce((obj, x) => { obj[x] = true; return obj; }, {} as { [k: string]: boolean });
@@ -136,8 +150,7 @@ function triggerSpellcheck(document: vscode.TextDocument) {
 
 async function triggerSpellcheckIfEnabled(document: vscode.TextDocument) {
     const uriStr = document.uri.toString();
-    const enabled = enabledDocuments[uriStr];
-    if (!enabled) {
+    if (!isUriEnabled(uriStr)) {
         return;
     }
 
@@ -160,16 +173,62 @@ function triggerDiffSpellcheckIfEnabled(event: vscode.TextDocumentChangeEvent) {
     triggerSpellcheckIfEnabled(event.document);
 }
 
-function triggerSpellcheckCommand(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit) {
+function toggleSpellcheckCommand(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit) {
     const uri = textEditor.document.uri;
     const uriStr = uri.toString();
-    const enabled = enabledDocuments[uriStr];
-    if (!enabled) {
-        enabledDocuments[uriStr] = true;
+    if (!enabledDocuments.has(uriStr)) {
+        enabledDocuments.add(uriStr);
         triggerSpellcheck(textEditor.document);
     } else {
-        delete enabledDocuments[uriStr];
+        enabledDocuments.delete(uriStr);
         spellDiagnostics.delete(uri);
+    }
+
+    updateStatusBar(textEditor);
+}
+
+function toggleSpellcheckAllCommand(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit) {
+    enabledAllDocuments = !enabledAllDocuments;
+    if (enabledAllDocuments) {
+        // Just turned on - spellcheck current document.
+        triggerSpellcheck(textEditor.document);
+    } else {
+        // Just turned off - clear all diagnostics for documents that are not
+        // explicitly enabled.
+        const toDelete = [] as Array<vscode.Uri>
+        spellDiagnostics.forEach((uri) => {
+            if (!isUriEnabled(uri.toString())) {
+                toDelete.push(uri);
+            }
+        })
+        toDelete.forEach((uri) => spellDiagnostics.delete(uri));
+        trimCache();
+    }
+
+    updateStatusBar(textEditor);
+}
+
+function textEditorChanged(textEditor: vscode.TextEditor) {
+    const uri = textEditor.document.uri;
+    if (isUriEnabled(uri.toString()) && !spellDiagnostics.has(uri)) {
+        // Changed to a document that we should be checking but there were no
+        // diagnostics - recheck.
+        triggerSpellcheck(textEditor.document);
+    }
+    updateStatusBar(textEditor);
+}
+
+function updateStatusBar(textEditor?: vscode.TextEditor) {
+    if (enabledAllDocuments) {
+        statusBarItem.text = "Aspell (all)";
+        statusBarItem.show();
+    } else if (textEditor) {
+        if (enabledDocuments.has(textEditor.document.uri.toString())) {
+            statusBarItem.text = "Aspell";
+            statusBarItem.show();
+        } else {
+            statusBarItem.hide();
+        }
     }
 }
 
@@ -246,12 +305,17 @@ export function activate(context: vscode.ExtensionContext): void {
     })
 
     vscode.workspace.onDidOpenTextDocument(triggerSpellcheckIfEnabled);
-    vscode.workspace.onDidChangeTextDocument(triggerDiffSpellcheckIfEnabled);
     vscode.workspace.onDidSaveTextDocument(triggerSpellcheckIfEnabled);
+    vscode.workspace.onDidChangeTextDocument(triggerDiffSpellcheckIfEnabled);
 
     vscode.workspace.onDidCloseTextDocument((textDocument) => {
         spellDiagnostics.delete(textDocument.uri);
     }, null);
 
-    vscode.commands.registerTextEditorCommand("aspell.spellCheck", triggerSpellcheckCommand);
+    vscode.window.onDidChangeActiveTextEditor(textEditorChanged);
+
+    vscode.commands.registerTextEditorCommand("aspell.spellCheck", toggleSpellcheckCommand);
+    vscode.commands.registerTextEditorCommand("aspell.spellCheckAll", toggleSpellcheckAllCommand);
+
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 0);
 }

@@ -34,7 +34,12 @@
     "commands": [
       {
         "command": "aspell.spellCheck",
-        "title": "Check spelling with aspell or clear current suggestions",
+        "title": "Enable spell checking for current document only",
+        "category": "Spell check"
+      },
+      {
+        "command": "aspell.spellCheckAll",
+        "title": "Enable spell checking for all documents",
         "category": "Spell check"
       }
     ]
