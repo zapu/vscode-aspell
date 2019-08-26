@@ -5,7 +5,6 @@ import * as child_process from 'child_process';
 import * as stream from "stream";
 import { Lock, Debouncer } from './lock';
 
-
 // Variables and types
 
 let spellDiagnostics: vscode.DiagnosticCollection;
@@ -17,15 +16,17 @@ let aspellLock = new Lock();
 let aspellLines: AwaitLine;
 
 // Ignore these words.
-let knownIgnore = arrayToHash([
+let knownIgnore = arrayToSet([
     // Various language keywords
-    "func", "isnt", "noop", "const", "instanceof", "boolean", "async",
+    "func", "isnt", "noop", "const", "instanceof", "boolean", "async", "concat",
     // Often used variable names
-    "cb", "ctx", "esc", "ret", "utils", "param", "args",
+    "cb", "ctx", "esc", "ret", "utils", "param", "args", "config", "json", "env",
     // Product names
     "vscode", "keybase",
     // Other keywords commonly found in code
-    "tokenize", "stringify", "fs", "vm", "http", "https", "uri",
+    "tokenize", "stringify", "fs", "vm", "http", "https", "uri", "url",
+    // Other words
+    "ok",
 ]);
 
 type spellCheckError = {
@@ -33,11 +34,9 @@ type spellCheckError = {
     suggestions: string[];
 }
 
-type spellCheckErrorHash = { [word: string]: spellCheckError }
-
 // Spellchecking cache.
-let knownGood = {} as { [word: string]: boolean };
-let knownBad = {} as spellCheckErrorHash;
+let knownGood = new Set<string>(); // set of known good words
+let knownBad = new Map<string, spellCheckError>(); // map of known errors for words
 
 // Enable or disable spellchecking either everywhere or by document.
 let enabledAllDocuments = false;
@@ -52,8 +51,10 @@ function isUriEnabled(uri: string) {
     return enabledAllDocuments || enabledDocuments.has(uri);
 }
 
-function arrayToHash(array: string[]) {
-    return array.reduce((obj, x) => { obj[x] = true; return obj; }, {} as { [k: string]: boolean });
+function arrayToSet<K>(array: K[]) : Set<K> {
+    const set = new Set<K>();
+    array.forEach((x) => set.add(x))
+    return set;
 }
 
 async function checkSpelling(words: string[]): Promise<spellCheckError[]> {
@@ -66,7 +67,7 @@ async function checkSpelling(words: string[]): Promise<spellCheckError[]> {
     console.log("checkSpelling: Sending ", words, " to aspell");
     aspell.stdin.write(words.join(" ") + "\n");
     let ret = [];
-    let newGoods = arrayToHash(words);
+    let newGoods = arrayToSet(words);
     for (; ;) {
         let line = await aspellLines.getLine();
         if (line == "") {
@@ -74,28 +75,36 @@ async function checkSpelling(words: string[]): Promise<spellCheckError[]> {
         }
         let error = spellCheckLine(line);
         if (error != null) {
-            delete newGoods[error.word];
+            newGoods.delete(error.word);
             ret.push(error);
-            knownBad[error.word] = error;
+            knownBad.set(error.word, error);
         }
     }
-    Object.assign(knownGood, newGoods);
+    newGoods.forEach((x) => knownGood.add(x));
     aspellLock.unlock();
     return ret;
 }
 
 function trimCache() {
     const CACHE_LEN_GOAL = 10000;
-    function trimOneCache(cache: { [key: string]: any }) {
-        const keys = Object.keys(cache);
-        for (let i = 0; i < keys.length - CACHE_LEN_GOAL; i++) {
-            delete cache[keys[i]];
+    function trimOneCache(cache: Set<string> | Map<string, any>) {
+        if(cache.size <= CACHE_LEN_GOAL) {
+            return;
         }
+        const toDelete = [] as Array<string>;
+        let goal = cache.size;
+        cache.forEach((x : string) => {
+            if (goal > CACHE_LEN_GOAL) {
+                toDelete.push(x);
+                goal--;
+            }
+        })
+        toDelete.forEach((x) => cache.delete(x));
     }
 
     trimOneCache(knownGood);
     trimOneCache(knownBad);
-    console.log("Cache sizes are:", "knownGood", Object.keys(knownGood).length, "knownBad", Object.keys(knownBad).length);
+    console.log("Cache sizes are:", "knownGood", knownGood.size, "knownBad", knownBad.size);
 }
 
 function triggerSpellcheck(document: vscode.TextDocument) {
@@ -113,11 +122,11 @@ function triggerSpellcheck(document: vscode.TextDocument) {
         }
     }
 
-    // arrayToHash > Object.keys to deduplicate
-    const words = Object.keys(arrayToHash(matches.map((x) => x.word)))
-        .filter((x) => knownIgnore[x.toLowerCase()] === undefined)
-        .filter((x) => knownGood[x] === undefined)
-        .filter((x) => knownBad[x] === undefined);
+    // arrayToSet > values to deduplicate
+    const words = Array.from(arrayToSet(matches.map((x) => x.word)).values())
+        .filter((x) => !knownIgnore.has(x.toLowerCase()))
+        .filter((x) => !knownGood.has(x))
+        .filter((x) => !knownBad.has(x))
 
     checkSpelling(words).then((errors: spellCheckError[]) => {
         // Ignore `errors` argument, operate solely on `knownGood` and
@@ -125,8 +134,8 @@ function triggerSpellcheck(document: vscode.TextDocument) {
         const diagnostics = [] as Array<vscode.Diagnostic>;
         matches.forEach((textMatch) => {
             const { word, index, length } = textMatch;
-            const error = knownBad[word];
-            if (error && knownBad.hasOwnProperty(word)) {
+            const error = knownBad.get(word);
+            if (error) {
                 const start = document.positionAt(index);
                 const end = start.with(undefined, start.character + length)
                 const diag = {
